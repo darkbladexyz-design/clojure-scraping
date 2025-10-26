@@ -1,0 +1,23 @@
+1761436182822	geckodriver	INFO	Listening on 127.0.0.1:4446
+1761436250483	webdriver::server	DEBUG	-> POST /session {"desiredCapabilities":{}}
+1761436250483	webdriver::command	WARN	You are using deprecated legacy session negotiation patterns (desiredCapabilities/requiredCapabilities), see https://developer.mozilla.org/en-US/docs/Web/WebDriver/Capabilities#Legacy
+1761436250484	geckodriver::capabilities	DEBUG	Trying to read firefox version from ini files
+1761436250484	geckodriver::capabilities	DEBUG	Trying to read firefox version from binary
+
+Command '/usr/bin/firefox' requires the firefox snap to be installed.
+Please install it with:
+
+snap install firefox
+
+1761436250496	geckodriver::capabilities	DEBUG	Failed to get binary version
+1761436250503	mozrunner::runner	INFO	Running command: MOZ_CRASHREPORTER="1" MOZ_CRASHREPORTER_NO_REPORT="1" MOZ_CRASHREPORTER_SHUTDOWN="1" MOZ_NO_REMOTE="1" "/usr/bin/firefox" "--marionette" "-no-remote" "-profile" "/tmp/rust_mozprofile6tIjNS"
+1761436250505	geckodriver::marionette	DEBUG	Waiting 60s to connect to browser on 127.0.0.1
+1761436250505	geckodriver::marionette	TRACE	Retrying in 100ms
+
+Command '/usr/bin/firefox' requires the firefox snap to be installed.
+Please install it with:
+
+snap install firefox
+
+1761436250606	geckodriver::browser	DEBUG	Browser process stopped: exit status: 1
+1761436250607	webdriver::server	DEBUG	<- 500 Internal Server Error {"value":{"error":"unknown error","message":"Process unexpectedly closed with status 1","stacktrace":""}}

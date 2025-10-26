@@ -1,119 +1,179 @@
 (ns demo.hickory-page
   (:require [org.httpkit.client :as http]
-            [hickory.core :as h]
-            [hickory.select :as s]
             [clojure.string :as str]
-            [clojure.java.io :as io]
-            [clojure.data.csv :as csv]
-            [clojure.data.json :as json])
-  (:import (java.net URLEncoder)))
+            [clojure.data.json :as json]
+            [demo.hickory-fab :as hf]
+            [demo.hover :as hover]))
+
+(def default-headers
+  {"accept" "*/*"
+   "user-agent" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"})
+
+(defn- get!
+  ([u] (get! u {}))
+  ([u opts]
+   (let [opts' (merge {:headers default-headers
+                       :timeout 120000
+                       :follow-redirects true}
+                      opts)
+         {:keys [status body error]} @(http/get u opts')]
+     (when error
+       (throw (ex-info (str "HTTP error " error) {:url u})))
+     (when (not (<= 200 status 299))
+       (throw (ex-info (str "HTTP " status) {:url u :status status})))
+     body)))
 
 
-(defn extract-json-object-after
-  "Finds `var <var-name> = { ... };` in `html` and returns the JSON object string
-   (without the trailing semicolon). Uses a simple brace counter."
-  [html var-name]
-  (when-let [pos (str/index-of html (str "var " var-name " ="))]
-    (let [from     (.indexOf html "{" pos)
-          n        (count html)]
-      (when (pos? from)
-        (loop [i (inc from), depth 1]
-          (when (< i n)
-            (let [ch (.charAt html i)
-                  depth' (cond
-                           (= ch \{) (inc depth)
-                           (= ch \}) (dec depth)
-                           :else     depth)]
-              (if (zero? depth')
-                ;; include braces; strip trailing ';' outside this fn
-                (subs html from (inc i))
-                (recur (inc i) depth')))))))))
+(defn- clean-lines
+  "Normalize descriptor strings: strip <br>, nbsp, trim, drop empties."
+  [xs]
+  (->> xs
+       (map #(-> %
+                 (str/replace #"<br\s*/?>" "\n")
+                 (str/replace #"\u00A0|&nbsp;" " ")
+                 (str/replace #"[ \t\r\f\v]+" " ")
+                 (str/trim)))
+       (mapcat #(str/split % #"\n"))
+       (map str/trim)
+       (remove str/blank?)
+       vec))
 
-(defn lines-from-g-rgassets
-  "Extract descriptor lines from the embedded g_rgAssets JSON in the page."
-  [html]
-  (when-let [json-obj (extract-json-object-after html "g_rgAssets")]
-    (let [json-str   json-obj                       ; object only
-          data       (json/read-str json-str)       ; keep string keys
-          ;; flatten all assets: data is {appid -> {ctxid -> {id -> asset}}}
-          assets     (for [[_appid app] data
-                           [_ctx ctx]   app
-                           [_id  a]     ctx]
-                       a)
-          asset      (first assets)                 ; pick the first; you can pick by name if you like
-          descs      (get asset "descriptions")]
-      (->> descs
-           (map #(get % "value"))
-           (map #(-> % (str/replace #"\s+" " ") str/trim))
-           (remove str/blank?)
-           vec))))
+(defn- split-kit
+  "Given cleaned descriptor lines, split into {:inputs [...] :outputs [...] }."
+  [lines]
+  (let [i-h (some->> lines
+                     (keep-indexed (fn [i s]
+                                     (when (re-find #"(?i)inputs that must be fulfilled" s) i)))
+                     first)
+        o-h (some->> lines
+                     (keep-indexed (fn [i s]
+                                     (when (re-find #"(?i)you will receive.*outputs" s) i)))
+                     first)
+        end (or (some->> lines
+                         (keep-indexed (fn [i s]
+                                         (when (re-find #"(?i)this is a limited use item" s) i)))
+                         first)
+                (count lines))]
+    (when (or (nil? i-h) (nil? o-h))
+      (throw (ex-info "Could not extract kit descriptors from page" {:lines lines})))
+    {:inputs  (subvec lines (inc i-h) o-h)
+     :outputs (subvec lines (inc o-h) end)}))
 
-(def UA "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome Safari")
+;; --- strategy 1: render endpoint -------------------------------------------
 
-(defn fetch-html [url]
-  (let [{:keys [status body error]}
-        @(http/get url {:headers {"User-Agent" UA
-                                  "Accept-Language" "en-US,en;q=0.9"}})]
-    (cond
-      error             (throw (ex-info "HTTP error" {:cause error}))
-      (not= 200 status) (throw (ex-info "Non-200 response" {:status status}))
-      :else body)))
+ (defn- from-render [listing-url]
+  ;; Use the listing-specific render endpoint ("/render?...") which reliably
+  ;; returns JSON for the single listing. Some pages don't accept a
+  ;; `render=1` query param on the listing URL but do support the
+  ;; "/render?start=..." path.
+  (let [render-url (str (if (str/ends-with? listing-url "/")
+                         listing-url
+                         (str listing-url "/"))
+                        "render?start=0&count=1&language=english&currency=1")
+        ;; Pretend to be an AJAX call from that listing page
+        body (get! render-url {:headers {"X-Requested-With" "XMLHttpRequest"
+                                         "Accept" "application/json, text/javascript, */*; q=0.01"
+                                         "Referer" listing-url}})
+        parsed (try
+                 (json/read-str body :key-fn keyword)
+                 (catch Exception _ ::not-json))]
+    (when (not= parsed ::not-json)
+    (let [hovers (:hovers parsed)
+      first-hover (when (map? hovers)
+            (-> hovers vals first))
+      descs (some->> first-hover
+            :descriptions
+            (map :value)
+            vec)]
+        (when (seq descs)
+          (-> descs clean-lines split-kit))))))
 
-(defn node-text [node]
-  (->> node
-       (tree-seq #(or (map? %) (sequential? %))
-                 #(if (map? %) (:content %) %))
-       (filter string?) (apply str) str/trim))
 
-(defn descriptor-lines [html]
-  (let [doc   (-> html h/parse h/as-hickory)
-        by-cl (s/select (s/descendant (s/class "item_desc_descriptors")
-                                      (s/class "descriptor")) doc)
-        by-id (s/select (s/descendant (s/id "largeiteminfo_item_descriptors")
-                                      (s/class "descriptor")) doc)
-        dom-lines (->> (concat by-cl by-id)
-                       (map node-text)
-                       (remove #(= % "\u00A0"))
-                       (remove str/blank?)
-                       vec)]
-    (if (seq dom-lines)
-      dom-lines
-      ;; Fallback: parse embedded g_rgAssets JSON
-      (or (lines-from-g-rgassets html) []))))
+;; --- strategy 2: g_rgAssets in HTML ----------------------------------------
 
-(defn parse-req [s]
-  (when-let [[_ item n] (re-matches #"(.*)\s+x\s+(\d+)$" s)]
-    {:item (str/trim item) :qty (Long/parseLong n)}))
+(defn- from-g-assets [listing-url]
+  (let [html (get! listing-url)
+        ;; handle `var g_rgAssets = {...};` or `g_rgAssets = {...};`
+        m  (some->> html
+                    (re-find #"(?s)g_rgAssets\s*=\s*(\{.*?\});")
+                    second
+                    (json/read-str :key-fn keyword))
+        ;; walk the nested {:appid {:contextid {id {:descriptions [...]}}}}
+        descs (some->> m
+                       vals first         ; first appid
+                       vals first         ; context "2"
+                       vals first         ; first asset
+                       :descriptions
+                       (map :value) vec)]
+    (when (seq descs)
+      (-> descs clean-lines split-kit))))
 
-(defn split-in-out [lines]
-  (let [after-in  (->> lines
-                       (drop-while #(not (re-find #"The following are the inputs" %)))
-                       rest)
-        [in-lines out-sec] (split-with #(not (re-find #"You will receive" %)) after-in)
-        out-lines (rest out-sec)]
-    {:inputs  (->> in-lines (keep parse-req) vec)
-     :outputs (->> out-lines
-                   (remove #(re-find #"\(Sheen:" %))
-                   vec)}))
+;; --- strategy 3: parse descriptor divs directly from listing HTML ---------
 
-(defn url-for [name-or-url]
-  (if (and name-or-url (str/starts-with? name-or-url "http"))
-    name-or-url
-    (str "https://steamcommunity.com/market/listings/440/"
-         (URLEncoder/encode
-          (or name-or-url "Specialized Killstreak Rocket Launcher Kit Fabricator")
-          "UTF-8"))))
+(defn- from-html-descriptors [listing-url]
+  "Parse the listing page HTML and extract any <div class=\"descriptor\"> text.
+  Targets the DOM under #largeiteminfo_content -> .item_desc_descriptors."
+  (let [html (get! listing-url)
+        ;; find all descriptor div inner HTML (DOTALL, case-insensitive)
+        matches (re-seq #"(?is)<div\s+class=\"descriptor\"[^>]*>(.*?)</div>" html)
+        inner   (map second matches)
+        ;; strip HTML tags and decode common entities
+        strip-tags (fn [s]
+                     (-> s
+                         (str/replace #"(?i)<br\s*/?>" "\n")
+                         (str/replace #"<[^>]+>" "")
+                         (str/replace #"&nbsp;|\u00A0" " ")
+                         (str/trim)))
+        descs   (->> inner
+                     (map strip-tags)
+                     (remove str/blank?)
+                     vec)]
+    (when (seq descs)
+      (-> descs clean-lines split-kit))))
 
-(defn -main [& [name-or-url]]
-  (let [url   (url-for name-or-url)
-        html  (fetch-html url)]
-    ;; save the exact HTML we got so you can open it if needed
-    (spit "last.html" html)
 
-    (let [lines  (descriptor-lines html)
-          {:keys [inputs outputs]} (split-in-out lines)]
-      (println "OK | inputs:" (count inputs) "| outputs:" (count outputs))
-      (doseq [{:keys [item qty]} inputs] (println " - " qty "x" item))
-      (doseq [o outputs] (println " ->" o))
-      (with-open [w (io/writer "inputs.csv")]
-        (csv/write-csv w (cons ["item" "qty"] (map (juxt :item :qty) inputs)))))))
+(defn- from-render-assets [listing-url]
+  "Use demo.hickory-fab helpers to fetch the listing render JSON, collect
+  assets and parse descriptors from the matching asset when available."
+  (when listing-url
+    (let [m (some-> (re-find #"/listings/\d+/(.+)$" listing-url) second (java.net.URLDecoder/decode "UTF-8"))
+          appid 440
+          j (try (hf/fetch-render-json appid m) (catch Exception _ nil))
+          assets (when j (vec (hf/collect-assets j)))
+          asset (when (seq assets) (hf/pick-asset assets m))]
+      (when asset
+        (let [fab (hf/extract-fabricator asset)]
+          (when (or (seq (:inputs fab)) (seq (:outputs fab)))
+            {:name (:name fab)
+             :url listing-url
+             :inputs (:inputs fab)
+             :outputs (:outputs fab)
+             :raw (:raw-lines fab)}))))))
+
+;; --- public ---------------------------------------------------------------
+
+(defn fetch-kit
+  "Return {:inputs [...] :outputs [...]} for a Steam Market listing URL."
+  [listing-url]
+  (or
+    (from-render listing-url)
+    (from-render-assets listing-url)
+    (from-g-assets listing-url)
+    (from-html-descriptors listing-url)
+    ;; strategy 4: try headless browser hover capture (geckodriver + Firefox)
+    (try
+      (when-let [lines (hover/capture-descriptors listing-url)]
+        (when (seq lines)
+          (-> lines clean-lines split-kit)))
+      (catch Throwable _ nil))
+    ;; Fallback: if Steam doesn't expose kit descriptors on the listing page
+    ;; (common when there are no active listings / hover data), return a
+    ;; safe minimal map with the listing name and URL so callers can show a
+    ;; helpful message rather than just failing with null.
+    (let [m (when listing-url
+              (some-> (re-find #"/listings/\d+/(.+)$" listing-url)
+                      second
+                      (java.net.URLDecoder/decode "UTF-8")))]
+      {:name m
+       :url  listing-url
+       :note "No kit descriptors found on the listing; Steam did not provide hover/render descriptions."})))

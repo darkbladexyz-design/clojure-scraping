@@ -10,10 +10,17 @@
 
 (def ua "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome Safari")
 
+(defn url-encode
+  "URL encode a string using %20 for spaces (proper URL encoding) instead of + (form encoding)"
+  [s]
+  (-> s
+      (URLEncoder/encode "UTF-8")
+      (str/replace "+" "%20")))
+
 (defn fetch-render-json [appid market-hash-name]
   (let [u (format (str "https://steamcommunity.com/market/listings/%s/%s/"
                        "render?start=0&count=10&language=english&currency=1")
-                  appid (URLEncoder/encode market-hash-name "UTF-8"))
+                  appid (url-encode market-hash-name))
         {:keys [status body error]} @(http/get u {:headers {"User-Agent" ua}})]
     (cond
       error            (throw (ex-info "HTTP error" {:cause error}))
