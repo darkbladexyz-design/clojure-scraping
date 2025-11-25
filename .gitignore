@@ -1,0 +1,41 @@
+# Leiningen
+/target
+/classes
+/checkouts
+pom.xml
+pom.xml.asc
+*.jar
+*.class
+/.lein-*
+/.nrepl-port
+
+# Clojure CLI
+.cpcache/
+.clj-kondo/.cache/
+
+# IDE
+.calva/
+.lsp/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Debug and output files
+debug.*.json
+out.csv
+out.edn
+inputs.csv
+last.html
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# WebDriver binaries
+geckodriver
+geckodriver.exe
+geckodriver-*.tar.gz
+chromedriver
+chromedriver.exe

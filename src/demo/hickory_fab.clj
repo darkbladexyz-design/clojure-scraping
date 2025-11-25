@@ -3,9 +3,7 @@
             [clojure.data.json :as json]
             [hickory.core :as h]
             [hickory.select :as s]
-            [clojure.string :as str]
-            [clojure.java.io :as io]
-            [clojure.data.csv :as csv])
+            [clojure.string :as str])
   (:import (java.net URLEncoder)))
 
 (def ua "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome Safari")
@@ -86,24 +84,4 @@
                    (remove #(re-find #"\(Sheen:" %)) vec)
      :raw-lines lines}))
 
-(defn -main [& [item]]
-  (let [appid 440
-        item  (or item "Specialized Killstreak Rocket Launcher Kit Fabricator")
-        j     (fetch-render-json appid item)
-        assets (vec (collect-assets j))]
-    (when (empty? assets)
-      (println "No assets returned. Keys in JSON:" (keys j))
-      (System/exit 1))
-    (let [asset (pick-asset assets item)]
-      (if-not asset
-        (do (println "Could not find asset for:" item)
-            (println "Example assets:" (map #(select-keys % [:market_name :market_hash_name :type]) (take 3 assets))))
-        (let [fab (extract-fabricator asset)]
-          (println "OK →" (:name fab)
-                   "| inputs:" (count (:inputs fab))
-                   "| outputs:" (count (:outputs fab)))
-          ;; optional files for you
-          (with-open [w (io/writer "inputs.csv")]
-            (csv/write-csv w (cons ["item" "qty"] (map (juxt :item :qty) (:inputs fab)))))
-          (spit "out.edn" (pr-str fab))
-          (doseq [l (:raw-lines fab)] (println " •" l)))))))
+;; extract-fabricator is used by hickory_page.clj to parse Steam kit data
