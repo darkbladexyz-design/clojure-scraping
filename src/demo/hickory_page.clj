@@ -104,6 +104,14 @@
           (or name-or-url "Specialized Killstreak Rocket Launcher Kit Fabricator")
           "UTF-8"))))
 
+(defn fetch-kit
+  "Returns {:inputs [{:item :qty} ...] :outputs [..]} for the given kit."
+  [name-or-url]
+  (let [url   (url-for name-or-url)
+        html  (fetch-html url)
+        lines (descriptor-lines html)]
+    (split-in-out lines)))
+
 (defn -main [& [name-or-url]]
   (let [url   (url-for name-or-url)
         html  (fetch-html url)]

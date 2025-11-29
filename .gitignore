@@ -1,0 +1,40 @@
+# Leiningen
+/target
+/classes
+/checkouts
+*.jar
+*.class
+/.lein-*
+/.nrepl-port
+.hgignore
+.hg/
+
+# Clojure
+pom.xml
+pom.xml.asc
+*.log
+/.cpcache
+/.calva
+/.clj-kondo
+/.lsp
+.nrepl-history
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+geckodriver*
+clojure-tools.zip
+inputs.csv
+last.html
+out.csv
+out.edn

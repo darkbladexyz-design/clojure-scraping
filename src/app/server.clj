@@ -6,7 +6,7 @@
    [ring.middleware.params :refer [wrap-params]]
    [clojure.data.json :as json]
    [clojure.walk :as walk]
-   [demo.hickory-page :as scrape]))   ;; <- this is what provides fetch-kit
+   [app.kits :as scrape]))   ;; <- this provides fetch-kit
 
 
 ;; --- API: /api/kit?name=... -----------------------------------------------
@@ -58,3 +58,7 @@
   (reset! server* (jetty/run-jetty app {:port port :join? false}))
   (println "Server on http://localhost:" port))
 (defn stop! [] (when @server* (.stop @server*) (reset! server* nil)))
+
+(defn -main [& args]
+  (let [port (if (seq args) (Integer/parseInt (first args)) 3000)]
+    (start! port)))
